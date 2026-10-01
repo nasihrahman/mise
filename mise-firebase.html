@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>MISE — Nutrition Spec Desk</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;600;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --bg: #ECEFE6; --surface: #FFFFFF; --ink: #1C231F; --inkSoft: #5B6459;
+    --line: #D3D7C9; --lineStrong: #B7BCAC; --green: #33513A; --greenDark: #20301F;
+    --paprika: #C1440E; --steel: #25507A; --cream: #F6F6F1;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 22px 22px;
+    font-family: 'Inter', sans-serif;
+    color: var(--ink);
+  }
+  button { cursor: pointer; font-family: inherit; }
+  input, select { font-family: inherit; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--lineStrong); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/12.2.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.2.1/firebase-database-compat.js"></script>
+<script>
+ const firebaseConfig = {
+    apiKey: "AIzaSyB5o_hIVzxZbljES47yNxYdF6YLENTMDsc",
+    authDomain: "mise-nutrition.firebaseapp.com",
+    databaseURL: "https://mise-nutrition-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "mise-nutrition",
+    storageBucket: "mise-nutrition.firebasestorage.app",
+    messagingSenderId: "551191845791",
+    appId: "1:551191845791:web:950d291bbbbea5af56fbaa",
+    measurementId: "G-92RMTRYQR0"
+  };
+
+  try {
+    if (!firebaseConfig.apiKey.startsWith("YOUR_")) {
+      firebase.initializeApp(firebaseConfig);
+      window.miseFirebase = firebase.database();
+    }
+  } catch (error) {
+    console.error("Firebase initialization failed:", error);
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo } = React;
+
+// ---------------------------------------------------------------------------
+// Design tokens
+// ---------------------------------------------------------------------------
+const C = {
+  bg: "#ECEFE6", surface: "#FFFFFF", ink: "#1C231F", inkSoft: "#5B6459",
+  line: "#D3D7C9", lineStrong: "#B7BCAC", green: "#33513A", greenDark: "#20301F",
+  paprika: "#C1440E", steel: "#25507A", amber: "#A66A00", cream: "#F6F6F1",
+};
+
+// ---------------------------------------------------------------------------
+// Data model
+// ---------------------------------------------------------------------------
+const FIELD_DEFS = [
+  { key: "calories", label: "Calories", unit: "", dv: null, indent: 0, section: "core" },
+  { key: "fat", label: "Total Fat", unit: "g", dv: 78, indent: 0, section: "core" },
+  { key: "saturatedFat", label: "Saturated Fat", unit: "g", dv: 20, indent: 1, section: "core" },
+  { key: "transFat", label: "Trans Fat", unit: "g", dv: null, indent: 1, section: "core" },
+  { key: "cholesterol", label: "Cholesterol", unit: "mg", dv: 300, indent: 0, section: "core" },
+  { key: "sodium", label: "Sodium", unit: "mg", dv: 2300, indent: 0, section: "core" },
+  { key: "carbs", label: "Total Carbohydrate", unit: "g", dv: 275, indent: 0, section: "core" },
+  { key: "fiber", label: "Dietary Fiber", unit: "g", dv: 28, indent: 1, section: "core" },
+  { key: "sugars", label: "Total Sugars", unit: "g", dv: null, indent: 1, section: "core" },
+  { key: "addedSugars", label: "Added Sugars", unit: "g", dv: 50, indent: 2, section: "core" },
+  { key: "protein", label: "Protein", unit: "g", dv: null, indent: 0, section: "core" },
+  { key: "vitaminD", label: "Vitamin D", unit: "mcg", dv: 20, indent: 0, section: "micro" },
+  { key: "calcium", label: "Calcium", unit: "mg", dv: 1300, indent: 0, section: "micro" },
+  { key: "iron", label: "Iron", unit: "mg", dv: 18, indent: 0, section: "micro" },
+  { key: "potassium", label: "Potassium", unit: "mg", dv: 4700, indent: 0, section: "micro" },
+];
+const FIELD_KEYS = FIELD_DEFS.map((f) => f.key);
+const CORE_FIELDS = FIELD_DEFS.filter((f) => f.section === "core" && f.key !== "calories");
+const MICRO_FIELDS = FIELD_DEFS.filter((f) => f.section === "micro");
+
+const ALLERGENS = [
+  "Milk", "Eggs", "Fish", "Crustacean shellfish", "Molluscs", "Tree nuts",
+  "Peanuts", "Wheat / Gluten", "Soybeans", "Sesame", "Mustard", "Celery",
+  "Lupin", "Sulphites",
+];
+
+const ALLERGEN_KEYWORDS = {
+  Milk: ["milk", "butter", "cream", "cheese", "yogurt", "yoghurt", "ghee", "whey", "casein", "paneer", "curd", "custard", "mascarpone", "buttermilk"],
+  Eggs: ["egg", "mayonnaise", "mayo", "meringue", "albumin", "aioli"],
+  Fish: ["fish", "salmon", "tuna", "cod", "anchov", "sardine", "tilapia", "mackerel", "trout", "bonito", "fish sauce", "fish stock"],
+  "Crustacean shellfish": ["shrimp", "prawn", "crab", "lobster", "crawfish", "crayfish", "langoustine"],
+  Molluscs: ["mussel", "oyster", "clam", "squid", "calamari", "octopus", "scallop", "abalone", "snail", "escargot", "cockle"],
+  "Tree nuts": ["almond", "walnut", "cashew", "pistachio", "pecan", "hazelnut", "macadamia", "brazil nut", "pine nut", "chestnut", "praline"],
+  Peanuts: ["peanut", "groundnut"],
+  "Wheat / Gluten": ["wheat", "flour", "bread", "pasta", "noodle", "barley", "rye", "malt", "couscous", "semolina", "breadcrumb", "panko", "seitan", "soy sauce"],
+  Soybeans: ["soy", "soya", "tofu", "edamame", "miso", "tempeh"],
+  Sesame: ["sesame", "tahini", "benne"],
+  Mustard: ["mustard"],
+  Celery: ["celery", "celeriac"],
+  Lupin: ["lupin", "lupini"],
+  Sulphites: ["sulphite", "sulfite", "wine", "raisin", "dried apricot", "dried fruit", "vinegar"],
+};
+
+function detectAllergensFromName(name) {
+  const lower = (name || "").toLowerCase();
+  if (!lower.trim()) return [];
+  return ALLERGENS.filter((a) => (ALLERGEN_KEYWORDS[a] || []).some((word) => lower.includes(word)));
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+function zeroTotals() {
+  const t = {};
+  FIELD_KEYS.forEach((k) => (t[k] = 0));
+  return t;
+}
+function emptyIngredient() {
+  return {
+    id: null, name: "", category: "Uncategorized", servingSize: 100, unit: "g",
+    calories: 0, fat: 0, saturatedFat: 0, transFat: 0, cholesterol: 0, sodium: 0,
+    carbs: 0, fiber: 0, sugars: 0, addedSugars: 0, protein: 0,
+    vitaminD: 0, calcium: 0, iron: 0, potassium: 0, allergens: [],
+  };
+}
+function emptyRecipe(name) {
+  return {
+    id: uid(), name: name || "New recipe", category: "Uncategorized", type: "final", servings: 1, unit: "g",
+    yieldWeight: "", notes: "", components: [],
+  };
+}
+function round(n, d) {
+  d = d === undefined ? 1 : d;
+  if (!isFinite(n)) return 0;
+  const m = Math.pow(10, d);
+  return Math.round(n * m) / m;
+}
+
+function calcRecipe(id, ingById, recById, cache, stack) {
+  if (cache.has(id)) return cache.get(id);
+  if (stack.has(id)) {
+    return { totals: zeroTotals(), totalWeight: 0, yieldWeight: 0, perGram: zeroTotals(), allergens: [], circular: true, missing: false };
+  }
+  const recipe = recById[id];
+  if (!recipe) {
+    return { totals: zeroTotals(), totalWeight: 0, yieldWeight: 0, perGram: zeroTotals(), allergens: [], circular: false, missing: true };
+  }
+  stack.add(id);
+  const totals = zeroTotals();
+  let totalWeight = 0, missing = false, circular = false;
+  const allergenSet = new Set();
+
+  recipe.components.forEach((c) => {
+    const w = Number(c.weight) || 0;
+    totalWeight += w;
+    if (c.type === "ingredient") {
+      const ing = ingById[c.refId];
+      if (!ing) { missing = true; return; }
+      const per = ing.servingSize > 0 ? w / ing.servingSize : 0;
+      FIELD_KEYS.forEach((k) => (totals[k] += (Number(ing[k]) || 0) * per));
+      (ing.allergens || []).forEach((a) => allergenSet.add(a));
+    } else {
+      const sub = calcRecipe(c.refId, ingById, recById, cache, stack);
+      if (sub.circular) circular = true;
+      if (sub.missing) missing = true;
+      FIELD_KEYS.forEach((k) => (totals[k] += (sub.perGram[k] || 0) * w));
+      (sub.allergens || []).forEach((a) => allergenSet.add(a));
+    }
+  });
+
+  stack.delete(id);
+  const yieldWeight = recipe.yieldWeight && Number(recipe.yieldWeight) > 0 ? Number(recipe.yieldWeight) : totalWeight;
+  const perGram = {};
+  FIELD_KEYS.forEach((k) => (perGram[k] = yieldWeight > 0 ? totals[k] / yieldWeight : 0));
+  const allergens = Array.from(allergenSet).sort();
+
+  const result = { totals, totalWeight, yieldWeight, perGram, allergens, missing, circular };
+  cache.set(id, result);
+  return result;
+}
+
+function wouldCreateCycle(hostId, candidateId, recById) {
+  if (hostId === candidateId) return true;
+  const seen = new Set();
+  function walk(id) {
+    if (id === hostId) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const r = recById[id];
+    if (!r) return false;
+    return r.components.some((c) => c.type === "recipe" && walk(c.refId));
+  }
+  return walk(candidateId);
+}
+
+// ---------------------------------------------------------------------------
+// Storage: Firebase Realtime Database when configured, localStorage fallback.
+// ---------------------------------------------------------------------------
+function useMiseStorage(onData) {
+  const handleRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe = null;
+
+    function useLocal() {
+      let data = { ingredients: [], recipes: [] };
+      try {
+        const raw = localStorage.getItem("mise-data");
+        if (raw) data = JSON.parse(raw);
+      } catch (e) {}
+      if (!cancelled) {
+        handleRef.current = { mode: "local" };
+        onData(data, "local");
+      }
+    }
+
+    try {
+      if (window.miseFirebase) {
+        const dbRef = window.miseFirebase.ref("mise/data");
+        handleRef.current = { mode: "firebase", ref: dbRef };
+        unsubscribe = dbRef.on(
+          "value",
+          (snap) => {
+            if (cancelled) return;
+            const data = snap.val() || { ingredients: [], recipes: [] };
+            onData(
+              { ingredients: data.ingredients || [], recipes: data.recipes || [] },
+              "firebase"
+            );
+          },
+          (error) => {
+            console.error("Firebase read failed:", error);
+            if (!cancelled) useLocal();
+          }
+        );
+      } else {
+        useLocal();
+      }
+    } catch (e) {
+      console.error("Firebase setup failed:", e);
+      useLocal();
+    }
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  async function persist(ingredients, recipes) {
+    const handle = handleRef.current;
+    if (!handle) return;
+    if (handle.mode === "firebase") {
+      await handle.ref.set({ ingredients, recipes });
+    } else {
+      localStorage.setItem("mise-data", JSON.stringify({ ingredients, recipes }));
+    }
+  }
+
+  return { persist, modeRef: handleRef };
+}
+
+// ---------------------------------------------------------------------------
+// Minimal inline icon set (no external icon library needed)
+// ---------------------------------------------------------------------------
+function Icon({ name, size, color }) {
+  const s = size || 16;
+  const col = color || "currentColor";
+  const p = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: col, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+  const paths = {
+    plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
+    trash: <><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></>,
+    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
+    upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></>,
+    search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+    x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
+    chef: <><path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z" /><line x1="6" y1="17" x2="18" y2="17" /></>,
+    alert: <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>,
+    download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>,
+    utensils: <><path d="M3 2v7c0 1.1.9 2 2 2h1a2 2 0 0 0 2-2V2" /><path d="M6 2v20" /><path d="M17 2a5 5 0 0 0-5 5v6a2 2 0 0 0 2 2h2v7" /></>,
+    flame: <><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></>,
+    info: <><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></>,
+    layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
+    check: <polyline points="20 6 9 17 4 12" />,
+    cloud: <><path d="M17.5 19H9a7 7 0 1 1 6.71-9h.79a4.5 4.5 0 1 1 1 8.9" /></>,
+    device: <><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></>,
+  };
+  return <svg {...p}>{paths[name] || null}</svg>;
+}
+
+// ---------------------------------------------------------------------------
+// Small building blocks
+// ---------------------------------------------------------------------------
+function Toast({ toast }) {
+  if (!toast) return null;
+  const isError = toast.type === "error";
+  return (
+    <div style={{
+      position: "fixed", bottom: 20, right: 20, zIndex: 100, padding: "10px 16px", borderRadius: 4,
+      boxShadow: "0 6px 16px rgba(0,0,0,0.2)", display: "flex", alignItems: "center", gap: 8, fontSize: 14,
+      background: isError ? "#F4E2DA" : C.greenDark, color: isError ? C.paprika : C.cream,
+      border: isError ? `1px solid ${C.paprika}` : "none", fontFamily: "Inter, sans-serif",
+    }}>
+      <Icon name={isError ? "alert" : "check"} size={16} />
+      {toast.msg}
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange, unit, small }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontFamily: "Inter, sans-serif", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 }}>
+        {label} {unit ? <span style={{ opacity: 0.6 }}>({unit})</span> : null}
+      </span>
+      <input type="number" step="any" value={value} onChange={(e) => onChange(e.target.value)}
+        style={{ padding: small ? "5px 8px" : "7px 8px", border: `1px solid ${C.line}`, fontFamily: "IBM Plex Mono, monospace",
+          fontSize: small ? 13 : 14, color: C.ink, background: C.cream, borderRadius: 2, outline: "none" }} />
+    </label>
+  );
+}
+
+function TextField({ label, value, onChange, placeholder, onBlur }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontFamily: "Inter, sans-serif", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 }}>
+        {label}
+      </span>
+      <input type="text" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} onBlur={onBlur}
+        style={{ padding: "7px 8px", border: `1px solid ${C.line}`, fontFamily: "Inter, sans-serif", fontSize: 14,
+          color: C.ink, background: C.cream, borderRadius: 2, outline: "none" }} />
+    </label>
+  );
+}
+
+function EmptyState({ iconName, title, body }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 8, padding: "64px 24px", borderRadius: 2, background: "rgba(255,255,255,0.5)", border: `1px dashed ${C.lineStrong}` }}>
+      <div style={{ padding: 12, borderRadius: "50%", background: C.surface, border: `1px solid ${C.line}` }}><Icon name={iconName} size={28} color={C.inkSoft} /></div>
+      <div style={{ fontFamily: "Roboto Slab, serif", fontWeight: 700, fontSize: 16, color: C.ink }}>{title}</div>
+      <div style={{ fontSize: 13, color: C.inkSoft, maxWidth: 380 }}>{body}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Ingredient modal
+// ---------------------------------------------------------------------------
+function IngredientModal({ initial, onCancel, onSave }) {
+  const [form, setForm] = useState(initial);
+  const [justDetected, setJustDetected] = useState([]);
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+
+  function runAutoDetect() {
+    const detected = detectAllergensFromName(form.name);
+    setJustDetected(detected);
+    if (detected.length === 0) return;
+    setForm((f) => ({ ...f, allergens: Array.from(new Set([...(f.allergens || []), ...detected])) }));
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(28,35,31,0.45)" }}>
+      <div style={{ width: "100%", maxWidth: 640, maxHeight: "90vh", overflowY: "auto", borderRadius: 4, boxShadow: "0 20px 50px rgba(0,0,0,0.3)", background: C.surface, border: `1px solid ${C.line}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", borderBottom: `2px solid ${C.ink}` }}>
+          <h3 style={{ fontFamily: "Roboto Slab, serif", fontWeight: 800, fontSize: 18, color: C.ink, margin: 0 }}>{form.id ? "Edit ingredient" : "New ingredient"}</h3>
+          <button onClick={onCancel} style={{ background: "none", border: "none", padding: 4 }}><Icon name="x" size={20} color={C.inkSoft} /></button>
+        </div>
+
+        <div style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <TextField label="Name" value={form.name} onChange={set("name")} onBlur={runAutoDetect} placeholder="e.g. Chicken breast, raw" />
+          </div>
+          <TextField label="Category" value={form.category} onChange={set("category")} placeholder="e.g. Protein" />
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontFamily: "Inter, sans-serif", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 }}>Values per</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input type="number" step="any" value={form.servingSize} onChange={(e) => set("servingSize")(e.target.value)}
+                style={{ flex: 1, padding: "7px 8px", border: `1px solid ${C.line}`, fontFamily: "IBM Plex Mono, monospace", fontSize: 14, color: C.ink, background: C.cream, borderRadius: 2, outline: "none" }} />
+              <select value={form.unit || "g"} onChange={(e) => set("unit")(e.target.value)}
+                style={{ padding: "7px 8px", border: `1px solid ${C.line}`, fontFamily: "Inter, sans-serif", fontSize: 14, color: C.ink, background: C.cream, borderRadius: 2 }}>
+                <option value="g">g</option>
+                <option value="ml">ml</option>
+              </select>
+            </div>
+          </label>
+
+          <div style={{ gridColumn: "1 / -1", paddingTop: 8, borderTop: `1px dashed ${C.line}` }} />
+
+          <NumberField label="Calories" value={form.calories} onChange={set("calories")} unit="kcal" />
+          <NumberField label="Protein" value={form.protein} onChange={set("protein")} unit="g" />
+          <NumberField label="Total fat" value={form.fat} onChange={set("fat")} unit="g" />
+          <NumberField label="Saturated fat" value={form.saturatedFat} onChange={set("saturatedFat")} unit="g" />
+          <NumberField label="Trans fat" value={form.transFat} onChange={set("transFat")} unit="g" />
+          <NumberField label="Cholesterol" value={form.cholesterol} onChange={set("cholesterol")} unit="mg" />
+          <NumberField label="Sodium" value={form.sodium} onChange={set("sodium")} unit="mg" />
+          <NumberField label="Total carbohydrate" value={form.carbs} onChange={set("carbs")} unit="g" />
+          <NumberField label="Dietary fiber" value={form.fiber} onChange={set("fiber")} unit="g" />
+          <NumberField label="Total sugars" value={form.sugars} onChange={set("sugars")} unit="g" />
+          <NumberField label="Added sugars" value={form.addedSugars} onChange={set("addedSugars")} unit="g" />
+
+          <div style={{ gridColumn: "1 / -1", paddingTop: 8, borderTop: `1px dashed ${C.line}` }} />
+          <div style={{ gridColumn: "1 / -1", fontFamily: "Inter, sans-serif", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase" }}>Vitamins & minerals</div>
+          <NumberField label="Vitamin D" value={form.vitaminD} onChange={set("vitaminD")} unit="mcg" />
+          <NumberField label="Calcium" value={form.calcium} onChange={set("calcium")} unit="mg" />
+          <NumberField label="Iron" value={form.iron} onChange={set("iron")} unit="mg" />
+          <NumberField label="Potassium" value={form.potassium} onChange={set("potassium")} unit="mg" />
+
+          <div style={{ gridColumn: "1 / -1", paddingTop: 8, borderTop: `1px dashed ${C.line}` }} />
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "Inter, sans-serif", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase" }}>Allergens present in this ingredient</span>
+              <button onClick={runAutoDetect} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "4px 8px", borderRadius: 2, color: C.steel, fontWeight: 700, border: `1px solid ${C.line}`, background: "none" }}>
+                <Icon name="search" size={12} /> Re-scan name
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: C.inkSoft, marginBottom: 8 }}>
+              Suggested automatically from the ingredient name when you leave that field — always check before saving.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {ALLERGENS.map((a) => {
+                const active = (form.allergens || []).includes(a);
+                const wasDetected = justDetected.includes(a);
+                return (
+                  <button key={a} onClick={() => setForm((f) => ({ ...f, allergens: active ? f.allergens.filter((x) => x !== a) : [...(f.allergens || []), a] }))}
+                    style={{ padding: "5px 10px", fontSize: 12, borderRadius: 999, display: "flex", alignItems: "center", gap: 4,
+                      border: `1px solid ${active ? C.paprika : C.line}`, background: active ? "#F4E2DA" : C.cream,
+                      color: active ? C.paprika : C.inkSoft, fontWeight: active ? 700 : 500 }}>
+                    {wasDetected && active && <Icon name="check" size={11} />}
+                    {a}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 2, fontSize: 12, fontWeight: 600,
+              background: (form.allergens || []).length ? "#F4E2DA" : C.cream, border: `1px solid ${(form.allergens || []).length ? C.paprika : C.line}`,
+              color: (form.allergens || []).length ? C.paprika : C.inkSoft }}>
+              {(form.allergens || []).length ? `Will be saved as containing: ${form.allergens.join(", ")}` : "No allergens will be recorded for this ingredient."}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "16px 24px", borderTop: `1px solid ${C.line}` }}>
+          <button onClick={onCancel} style={{ padding: "8px 16px", fontSize: 14, borderRadius: 2, background: "none", border: "none", color: C.inkSoft, fontWeight: 600 }}>Cancel</button>
+          <button onClick={() => { if (!form.name.trim()) return; onSave({ ...form, servingSize: Number(form.servingSize) || 100 }); }}
+            disabled={!form.name.trim()}
+            style={{ padding: "8px 16px", fontSize: 14, borderRadius: 2, display: "flex", alignItems: "center", gap: 8,
+              background: C.green, color: C.cream, fontWeight: 700, border: "none", opacity: form.name.trim() ? 1 : 0.4 }}>
+            <Icon name="check" size={15} /> Save ingredient
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Nutrition label + allergens + macro chart
+// ---------------------------------------------------------------------------
+function NutritionLabel({ recipe, calc, basis }) {
+  const servings = Math.max(Number(recipe.servings) || 1, 0.001);
+  const perServing = {}; FIELD_KEYS.forEach((k) => (perServing[k] = calc.totals[k] / servings));
+  const per100 = {}; FIELD_KEYS.forEach((k) => (per100[k] = calc.perGram[k] * 100));
+  const shown = basis === "serving" ? perServing : per100;
+
+  const row = (f) => {
+    const val = shown[f.key];
+    const dvPct = f.dv ? Math.round((val / f.dv) * 100) : null;
+    const roundDp = ["sodium", "cholesterol", "calcium", "iron", "potassium"].includes(f.key) ? 0 : 1;
+    return (
+      <div key={f.key} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", paddingLeft: f.indent ? f.indent * 16 : 0, borderBottom: `1px solid ${C.ink}`, paddingTop: 3, paddingBottom: 3 }}>
+        <span style={{ fontFamily: "Inter, sans-serif", fontWeight: f.indent ? 400 : 600, fontSize: f.indent ? 13 : 14, color: C.ink }}>
+          {f.label} <span style={{ fontFamily: "IBM Plex Mono, monospace" }}>{round(val, roundDp)}{f.unit}</span>
+        </span>
+        {dvPct !== null && <span style={{ fontFamily: "IBM Plex Mono, monospace", fontWeight: 700, fontSize: 13, color: C.ink }}>{dvPct}%</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ width: "100%", maxWidth: 380, background: C.surface, border: `3px solid ${C.ink}`, padding: "14px 16px", fontFamily: "Inter, sans-serif" }}>
+      <div style={{ fontFamily: "Roboto Slab, serif", fontWeight: 800, fontSize: 26, lineHeight: 1, color: C.ink }}>Nutrition Facts</div>
+      <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4 }}>
+        {basis === "serving" ? `${servings} serving${servings === 1 ? "" : "s"} per item · ${round(calc.totalWeight, 0)} ${recipe.unit || "g"} batch` : `Per 100 ${recipe.unit || "g"}`}
+      </div>
+      <div style={{ borderTop: `10px solid ${C.ink}`, marginTop: 6 }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", padding: "6px 0", borderBottom: `4px solid ${C.ink}` }}>
+        <span style={{ fontFamily: "Roboto Slab, serif", fontWeight: 700, fontSize: 15 }}>Calories</span>
+        <span style={{ fontFamily: "Roboto Slab, serif", fontWeight: 800, fontSize: 32, color: C.paprika }}>{round(shown.calories, 0)}</span>
+      </div>
+      <div style={{ textAlign: "right", fontSize: 11, color: C.inkSoft, borderBottom: `1px solid ${C.ink}`, paddingBottom: 2 }}>% Daily Value*</div>
+      <div>{CORE_FIELDS.map(row)}</div>
+      <div style={{ borderTop: `6px solid ${C.ink}`, marginTop: 2 }} />
+      <div>{MICRO_FIELDS.map(row)}</div>
+      <div style={{ fontSize: 10, color: C.inkSoft, marginTop: 8, lineHeight: 1.4 }}>
+        * % Daily Value based on a 2,000 calorie reference diet. Figures are calculated automatically from this recipe's ingredient composition — verify against a lab assay before using on packaging.
+      </div>
+    </div>
+  );
+}
+
+function AllergenStatement({ calc }) {
+  const hasAllergens = calc.allergens && calc.allergens.length > 0;
+  return (
+    <div style={{ width: "100%", maxWidth: 380, marginTop: 8, background: hasAllergens ? "#F4E2DA" : C.cream, border: `2px solid ${hasAllergens ? C.paprika : C.line}`, padding: "10px 14px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <Icon name="alert" size={15} color={hasAllergens ? C.paprika : C.inkSoft} />
+        <div>
+          <span style={{ fontFamily: "Inter, sans-serif", fontWeight: 800, fontSize: 12.5, color: hasAllergens ? C.paprika : C.inkSoft, textTransform: "uppercase", letterSpacing: 0.3 }}>
+            {hasAllergens ? "Contains: " : "No major allergens declared"}
+          </span>
+          {hasAllergens && <span style={{ fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 12.5, color: C.paprika }}>{calc.allergens.join(", ")}</span>}
+        </div>
+      </div>
+      {calc.missing && <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 4 }}>One or more components are missing, so this list may be incomplete.</div>}
+    </div>
+  );
+}
+
+function MacroChart({ calc }) {
+  const proteinCal = calc.totals.protein * 4;
+  const carbCal = calc.totals.carbs * 4;
+  const fatCal = calc.totals.fat * 9;
+  const sum = proteinCal + carbCal + fatCal;
+  if (sum <= 0) return <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, color: C.inkSoft }}>Add components with fat, carbohydrate or protein to see the calorie breakdown.</div>;
+
+  const p = (proteinCal / sum) * 100, cc = (carbCal / sum) * 100;
+  const gradient = `conic-gradient(${C.steel} 0% ${p}%, ${C.green} ${p}% ${p + cc}%, ${C.paprika} ${p + cc}% 100%)`;
+  const data = [
+    { name: "Protein", value: proteinCal, color: C.steel },
+    { name: "Carbs", value: carbCal, color: C.green },
+    { name: "Fat", value: fatCal, color: C.paprika },
+  ];
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div style={{ width: 110, height: 110, borderRadius: "50%", background: gradient, position: "relative", flexShrink: 0 }}>
+        <div style={{ position: "absolute", inset: 16, borderRadius: "50%", background: C.surface }} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {data.map((d) => (
+          <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "Inter, sans-serif", fontSize: 13, color: C.ink }}>
+            <span style={{ width: 10, height: 10, background: d.color, display: "inline-block", borderRadius: 2 }} />
+            {d.name}
+            <span style={{ color: C.inkSoft, fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{Math.round((d.value / sum) * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recipe detail
+// ---------------------------------------------------------------------------
+function RecipeDetail(props) {
+  const { recipe, calc, ingredients, recipes, labelBasis, setLabelBasis, onUpdate,
+    newComponentType, setNewComponentType, newComponentRef, setNewComponentRef,
+    newComponentWeight, setNewComponentWeight, addComponent, removeComponent,
+    updateComponentWeight, confirmDelete, onAskDelete, onDelete, onCancelDelete, onDownload } = props;
+
+  const availableIngredients = [...ingredients].sort((a, b) => a.name.localeCompare(b.name));
+  const availableRecipes = recipes.filter((r) => r.id !== recipe.id).sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ padding: 16, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}` }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+          <div style={{ gridColumn: "span 2" }}><TextField label="Recipe name" value={recipe.name} onChange={(v) => onUpdate({ name: v })} /></div>
+          <TextField label="Category" value={recipe.category} onChange={(v) => onUpdate({ category: v })} />
+          <NumberField label="Servings" value={recipe.servings} onChange={(v) => onUpdate({ servings: v })} small />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 12 }}>
+          <div style={{ gridColumn: "span 2" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3 }}>Final yield (optional) <span style={{ opacity: 0.6, textTransform: "none" }}>— overrides sum of components</span></span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input type="number" step="any" value={recipe.yieldWeight} onChange={(e) => onUpdate({ yieldWeight: e.target.value })}
+                  style={{ flex: 1, padding: "5px 8px", border: `1px solid ${C.line}`, fontFamily: "IBM Plex Mono, monospace", fontSize: 13, color: C.ink, background: C.cream, borderRadius: 2, outline: "none" }} />
+                <select value={recipe.unit || "g"} onChange={(e) => onUpdate({ unit: e.target.value })}
+                  style={{ padding: "5px 8px", border: `1px solid ${C.line}`, fontFamily: "Inter, sans-serif", fontSize: 13, color: C.ink, background: C.cream, borderRadius: 2 }}>
+                  <option value="g">g</option>
+                  <option value="ml">ml</option>
+                </select>
+              </div>
+            </label>
+          </div>
+          <div style={{ gridColumn: "span 2" }}>
+            <span style={{ display: "block", fontSize: 11, color: C.inkSoft, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 }}>Type</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => onUpdate({ type: "subrecipe" })} style={{ flex: 1, padding: "6px 10px", fontSize: 13, borderRadius: 2, fontWeight: 700,
+                background: recipe.type === "subrecipe" ? C.steel : C.cream, color: recipe.type === "subrecipe" ? C.cream : C.inkSoft, border: `1px solid ${C.line}` }}>Sub-recipe</button>
+              <button onClick={() => onUpdate({ type: "final" })} style={{ flex: 1, padding: "6px 10px", fontSize: 13, borderRadius: 2, fontWeight: 700,
+                background: recipe.type !== "subrecipe" ? C.green : C.cream, color: recipe.type !== "subrecipe" ? C.cream : C.inkSoft, border: `1px solid ${C.line}` }}>Final product</button>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: C.inkSoft, fontFamily: "IBM Plex Mono, monospace" }}>
+            Components add up to {round(calc.totalWeight, 0)} {recipe.unit || "g"} · using {round(calc.yieldWeight, 0)} {recipe.unit || "g"} as the finished weight
+          </div>
+          {confirmDelete ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: C.paprika, fontWeight: 700 }}>Delete this recipe?</span>
+              <button onClick={onDelete} style={{ fontSize: 12, fontWeight: 700, padding: "4px 8px", borderRadius: 2, background: C.paprika, color: C.cream, border: "none" }}>Yes, delete</button>
+              <button onClick={onCancelDelete} style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, background: "none", border: "none" }}>Cancel</button>
+            </div>
+          ) : (
+            <button onClick={onAskDelete} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: C.inkSoft, background: "none", border: "none" }}>
+              <Icon name="trash" size={13} /> Delete recipe
+            </button>
+          )}
+        </div>
+      </div>
+
+      {(calc.missing || calc.circular) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 2, fontSize: 14, background: "#F4E2DA", color: C.paprika, border: `1px solid ${C.paprika}` }}>
+          <Icon name="alert" size={15} />
+          {calc.circular ? "This recipe references itself through a sub-recipe — remove the loop to get accurate numbers." : "One or more components point to an ingredient or recipe that no longer exists."}
+        </div>
+      )}
+
+      <div style={{ padding: 16, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <Icon name="layers" size={15} color={C.green} />
+          <span style={{ fontFamily: "Roboto Slab, serif", fontWeight: 700, fontSize: 15, color: C.ink }}>Components</span>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+          {recipe.components.length === 0 && <div style={{ fontSize: 13, color: C.inkSoft }}>No components yet — add an ingredient or an existing recipe as a sub-recipe below.</div>}
+          {recipe.components.map((c) => {
+            const isIng = c.type === "ingredient";
+            const item = isIng ? ingredients.find((i) => i.id === c.refId) : recipes.find((r) => r.id === c.refId);
+            return (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 2, background: C.cream, border: `1px solid ${C.line}` }}>
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", padding: "2px 6px", borderRadius: 2, background: isIng ? "#DDE7DC" : "#DCE5EE", color: isIng ? C.green : C.steel }}>
+                  {isIng ? "Ingredient" : "Sub-recipe"}
+                </span>
+                <span style={{ flex: 1, fontSize: 14, color: item ? C.ink : C.paprika, fontWeight: 500 }}>{item ? item.name : "Missing item"}</span>
+                <input type="number" value={c.weight} onChange={(e) => updateComponentWeight(c.id, e.target.value)}
+                  style={{ width: 80, padding: "4px 8px", fontSize: 14, textAlign: "right", borderRadius: 2, border: `1px solid ${C.line}`, fontFamily: "IBM Plex Mono, monospace" }} />
+                <span style={{ fontSize: 12, color: C.inkSoft, minWidth: 18 }}>{(item && item.unit) || "g"}</span>
+                <button onClick={() => removeComponent(c.id)} style={{ padding: 4, background: "none", border: "none" }}><Icon name="trash" size={14} color={C.inkSoft} /></button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 8, paddingTop: 12, borderTop: `1px dashed ${C.line}` }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 11, color: C.inkSoft, fontWeight: 600 }}>Type</span>
+            <select value={newComponentType} onChange={(e) => { setNewComponentType(e.target.value); setNewComponentRef(""); }}
+              style={{ padding: "7px 8px", borderRadius: 2, fontSize: 14, border: `1px solid ${C.line}` }}>
+              <option value="ingredient">Ingredient</option>
+              <option value="recipe">Sub-recipe</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 180 }}>
+            <span style={{ fontSize: 11, color: C.inkSoft, fontWeight: 600 }}>Item</span>
+            <select value={newComponentRef} onChange={(e) => setNewComponentRef(e.target.value)}
+              style={{ padding: "7px 8px", borderRadius: 2, fontSize: 14, border: `1px solid ${C.line}` }}>
+              <option value="">Select…</option>
+              {newComponentType === "ingredient"
+                ? availableIngredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)
+                : <>
+                    <optgroup label="Sub-recipes">
+                      {availableRecipes.filter((r) => r.type === "subrecipe").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Final products">
+                      {availableRecipes.filter((r) => r.type !== "subrecipe").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </optgroup>
+                  </>}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 11, color: C.inkSoft, fontWeight: 600 }}>
+              Weight ({(() => {
+                if (!newComponentRef) return "g/ml";
+                const picked = newComponentType === "ingredient" ? availableIngredients.find((i) => i.id === newComponentRef) : availableRecipes.find((r) => r.id === newComponentRef);
+                return (picked && picked.unit) || "g";
+              })()})
+            </span>
+            <input type="number" value={newComponentWeight} onChange={(e) => setNewComponentWeight(e.target.value)}
+              style={{ width: 96, padding: "7px 8px", borderRadius: 2, fontSize: 14, border: `1px solid ${C.line}`, fontFamily: "IBM Plex Mono, monospace" }} />
+          </label>
+          <button onClick={addComponent} disabled={!newComponentRef || !newComponentWeight}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 14, borderRadius: 2, background: C.green, color: C.cream, fontWeight: 700, border: "none", opacity: (!newComponentRef || !newComponentWeight) ? 0.4 : 1 }}>
+            <Icon name="plus" size={15} /> Add
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 20, alignItems: "start" }}>
+        <div>
+          <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setLabelBasis("serving")} style={{ padding: "4px 12px", fontSize: 12, borderRadius: 2, fontWeight: 600, background: labelBasis === "serving" ? C.ink : "transparent", color: labelBasis === "serving" ? C.cream : C.inkSoft, border: `1px solid ${C.line}` }}>Per serving</button>
+            <button onClick={() => setLabelBasis("100g")} style={{ padding: "4px 12px", fontSize: 12, borderRadius: 2, fontWeight: 600, background: labelBasis === "100g" ? C.ink : "transparent", color: labelBasis === "100g" ? C.cream : C.inkSoft, border: `1px solid ${C.line}` }}>Per 100 {recipe.unit || "g"}</button>
+            <button onClick={onDownload} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12, borderRadius: 2, fontWeight: 700, background: C.paprika, color: C.cream, border: "none" }}>
+              <Icon name="download" size={13} /> Download spec sheet
+            </button>
+          </div>
+          <NutritionLabel recipe={recipe} calc={calc} basis={labelBasis} />
+          <AllergenStatement calc={calc} />
+        </div>
+        <div style={{ padding: 16, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <Icon name="flame" size={15} color={C.paprika} />
+            <span style={{ fontFamily: "Roboto Slab, serif", fontWeight: 700, fontSize: 15, color: C.ink }}>Calories from macros</span>
+          </div>
+          <MacroChart calc={calc} />
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 16, paddingTop: 12, borderTop: `1px dashed ${C.line}`, fontSize: 12, color: C.inkSoft }}>
+            <Icon name="info" size={14} />
+            Every value here is derived automatically from the ingredient and sub-recipe weights above — edit a component and the label and chart update immediately.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main app
+// ---------------------------------------------------------------------------
+function App() {
+  const [ingredients, setIngredients] = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [storageMode, setStorageMode] = useState(null);
+  const [tab, setTab] = useState("ingredients");
+  const [toast, setToast] = useState(null);
+
+  const [ingModal, setIngModal] = useState(null);
+  const [ingSearch, setIngSearch] = useState("");
+  const [ingCategory, setIngCategory] = useState("All");
+  const [confirmDeleteIng, setConfirmDeleteIng] = useState(null);
+  const ingFileRef = useRef();
+
+  const [selectedRecipeId, setSelectedRecipeId] = useState(null);
+  const [recipeSearch, setRecipeSearch] = useState("");
+  const [recipeTypeFilter, setRecipeTypeFilter] = useState("all");
+  const [labelBasis, setLabelBasis] = useState("serving");
+  const [confirmDeleteRecipe, setConfirmDeleteRecipe] = useState(null);
+  const [newComponentType, setNewComponentType] = useState("ingredient");
+  const [newComponentRef, setNewComponentRef] = useState("");
+  const [newComponentWeight, setNewComponentWeight] = useState("");
+  const recipeFileRef = useRef();
+
+  const skipFirstSave = useRef(true);
+  const saveTimer = useRef(null);
+
+  function showToast(msg, type) { setToast({ msg, type: type || "success" }); setTimeout(() => setToast(null), 3200); }
+
+  const { persist } = useMiseStorage((data, mode) => {
+    setIngredients(data.ingredients || []);
+    setRecipes(data.recipes || []);
+    setStorageMode(mode);
+    setLoaded(true);
+  });
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (skipFirstSave.current) { skipFirstSave.current = false; return; }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try { await persist(ingredients, recipes); } catch (e) { showToast("Could not save your changes", "error"); }
+    }, 500);
+    return () => clearTimeout(saveTimer.current);
+    // eslint-disable-next-line
+  }, [ingredients, recipes, loaded]);
+
+  const ingById = useMemo(() => Object.fromEntries(ingredients.map((i) => [i.id, i])), [ingredients]);
+  const recById = useMemo(() => Object.fromEntries(recipes.map((r) => [r.id, r])), [recipes]);
+  const ingCategories = useMemo(() => ["All", ...Array.from(new Set(ingredients.map((i) => i.category || "Uncategorized"))).sort()], [ingredients]);
+
+  const filteredIngredients = useMemo(() => ingredients
+    .filter((i) => (ingCategory === "All" ? true : (i.category || "Uncategorized") === ingCategory))
+    .filter((i) => i.name.toLowerCase().includes(ingSearch.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name)), [ingredients, ingSearch, ingCategory]);
+
+  const filteredRecipes = useMemo(() => recipes
+    .filter((r) => recipeTypeFilter === "all" ? true : recipeTypeFilter === "subrecipe" ? r.type === "subrecipe" : r.type !== "subrecipe")
+    .filter((r) => r.name.toLowerCase().includes(recipeSearch.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name)), [recipes, recipeSearch, recipeTypeFilter]);
+
+  const selectedRecipe = selectedRecipeId ? recById[selectedRecipeId] : null;
+  const selectedCalc = useMemo(() => selectedRecipe ? calcRecipe(selectedRecipe.id, ingById, recById, new Map(), new Set()) : null, [selectedRecipe, ingById, recById]);
+
+  function saveIngredient(form) {
+    if (form.id) { setIngredients((prev) => prev.map((i) => (i.id === form.id ? form : i))); showToast("Ingredient updated"); }
+    else { setIngredients((prev) => [...prev, { ...form, id: uid() }]); showToast("Ingredient added"); }
+    setIngModal(null);
+  }
+  function deleteIngredient(id) { setIngredients((prev) => prev.filter((i) => i.id !== id)); setConfirmDeleteIng(null); showToast("Ingredient deleted"); }
+
+  function handleIngredientCsv(e) {
+    const file = e.target.files[0]; if (!file) return;
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => {
+      const rows = results.data.map((r) => ({
+        id: uid(), name: (r.name || "").trim(), category: (r.category || "Uncategorized").trim(),
+        servingSize: parseFloat(r.servingSize) || 100, unit: (r.unit || "").trim().toLowerCase() === "ml" ? "ml" : "g", calories: parseFloat(r.calories) || 0,
+        fat: parseFloat(r.fat) || 0, saturatedFat: parseFloat(r.saturatedFat) || 0, transFat: parseFloat(r.transFat) || 0,
+        cholesterol: parseFloat(r.cholesterol) || 0, sodium: parseFloat(r.sodium) || 0, carbs: parseFloat(r.carbs) || 0,
+        fiber: parseFloat(r.fiber) || 0, sugars: parseFloat(r.sugars) || 0, addedSugars: parseFloat(r.addedSugars) || 0,
+        protein: parseFloat(r.protein) || 0, vitaminD: parseFloat(r.vitaminD) || 0, calcium: parseFloat(r.calcium) || 0,
+        iron: parseFloat(r.iron) || 0, potassium: parseFloat(r.potassium) || 0,
+        allergens: (r.allergens || "").trim().length > 0
+          ? (r.allergens || "").split(";").map((a) => a.trim()).filter((a) => a && ALLERGENS.includes(a))
+          : detectAllergensFromName(r.name),
+      })).filter((r) => r.name);
+      if (rows.length === 0) showToast("No valid rows found in that file", "error");
+      else { setIngredients((prev) => [...prev, ...rows]); showToast(`Imported ${rows.length} ingredient${rows.length === 1 ? "" : "s"}`); }
+    }, error: () => showToast("Could not read that CSV file", "error") });
+    e.target.value = "";
+  }
+
+  function addRecipe() { const r = emptyRecipe(); setRecipes((prev) => [...prev, r]); setSelectedRecipeId(r.id); setTab("recipes"); }
+  function updateRecipe(id, patch) { setRecipes((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); }
+  function deleteRecipe(id) { setRecipes((prev) => prev.filter((r) => r.id !== id)); if (selectedRecipeId === id) setSelectedRecipeId(null); setConfirmDeleteRecipe(null); showToast("Recipe deleted"); }
+  async function handleDownloadSpec() {
+    if (!selectedRecipe || !selectedCalc) return;
+    const html = buildSpecSheetHtml(selectedRecipe, selectedCalc, ingredients, recipes);
+    try {
+      await offerDownload(`${slugify(selectedRecipe.name)}-spec-sheet.html`, html, "text/html;charset=utf-8;");
+      showToast("Spec sheet downloaded — open it and print to PDF if you need a paper copy");
+    } catch (e) {
+      showToast("Could not generate the spec sheet", "error");
+    }
+  }
+  function addComponent() {
+    if (!newComponentRef || !newComponentWeight) return;
+    if (newComponentType === "recipe" && wouldCreateCycle(selectedRecipe.id, newComponentRef, recById)) { showToast("That would make the recipe reference itself — pick another item", "error"); return; }
+    const comp = { id: uid(), type: newComponentType, refId: newComponentRef, weight: Number(newComponentWeight) };
+    updateRecipe(selectedRecipe.id, { components: [...selectedRecipe.components, comp] });
+    setNewComponentRef(""); setNewComponentWeight("");
+  }
+  function removeComponent(compId) { updateRecipe(selectedRecipe.id, { components: selectedRecipe.components.filter((c) => c.id !== compId) }); }
+  function updateComponentWeight(compId, weight) { updateRecipe(selectedRecipe.id, { components: selectedRecipe.components.map((c) => (c.id === compId ? { ...c, weight } : c)) }); }
+
+  function handleRecipeCsv(e) {
+    const file = e.target.files[0]; if (!file) return;
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => {
+      const rows = results.data; const groups = {};
+      rows.forEach((r) => {
+        const key = (r.recipe_name || "").trim(); if (!key) return;
+        if (!groups[key]) groups[key] = { name: key, category: (r.category || "Uncategorized").trim(), type: (r.recipe_type || "").trim().toLowerCase() === "subrecipe" || (r.recipe_type || "").trim().toLowerCase() === "sub-recipe" ? "subrecipe" : "final", unit: (r.unit || "").trim().toLowerCase() === "ml" ? "ml" : "g", servings: parseFloat(r.servings) || 1, yieldWeight: r.yield_weight ? parseFloat(r.yield_weight) : "", rows: [] };
+        groups[key].rows.push(r);
+      });
+      const groupNames = Object.keys(groups);
+      if (groupNames.length === 0) { showToast("No valid rows found in that file", "error"); e.target.value = ""; return; }
+      const nameToId = {}; recipes.forEach((r) => (nameToId[r.name.toLowerCase()] = r.id));
+      const newRecipes = groupNames.map((name) => {
+        const id = uid(); nameToId[name.toLowerCase()] = id;
+        return { id, name, category: groups[name].category, type: groups[name].type, unit: groups[name].unit, servings: groups[name].servings, yieldWeight: groups[name].yieldWeight, notes: "", components: [] };
+      });
+      const ingNameToId = {}; ingredients.forEach((i) => (ingNameToId[i.name.toLowerCase()] = i.id));
+      let missingRefs = 0;
+      newRecipes.forEach((rec) => {
+        groups[rec.name].rows.forEach((row) => {
+          const compName = (row.component_name || "").trim().toLowerCase();
+          const type = (row.component_type || "ingredient").trim().toLowerCase() === "recipe" ? "recipe" : "ingredient";
+          const refId = type === "ingredient" ? ingNameToId[compName] : nameToId[compName];
+          const weight = parseFloat(row.weight_g) || 0;
+          if (!refId || !weight) { missingRefs++; return; }
+          rec.components.push({ id: uid(), type, refId, weight });
+        });
+      });
+      setRecipes((prev) => [...prev, ...newRecipes]);
+      showToast(`Imported ${newRecipes.length} recipe${newRecipes.length === 1 ? "" : "s"}` + (missingRefs ? ` — ${missingRefs} component row(s) skipped (name not found)` : ""));
+    }, error: () => showToast("Could not read that CSV file", "error") });
+    e.target.value = "";
+  }
+
+  const ingredientTemplate = "name,category,servingSize,unit,calories,fat,saturatedFat,transFat,cholesterol,sodium,carbs,fiber,sugars,addedSugars,protein,vitaminD,calcium,iron,potassium,allergens\n" +
+    "Chicken breast raw,Protein,100,g,120,2.6,0.7,0,73,45,0,0,0,0,22.5,0.1,11,0.4,220,\n" +
+    "Butter,Dairy,100,g,717,81,51,3.3,215,11,0.1,0,0.1,0,0.9,0,24,0,24,Milk\n" +
+    "Cooking cream,Dairy,100,ml,195,19,12,0,62,40,3,0,3,0,2.1,0,65,0,75,Milk\n";
+  const recipeTemplate = "recipe_name,category,recipe_type,unit,servings,yield_weight,component_type,component_name,weight_g\n" +
+    "Tomato sauce,Sauce,subrecipe,g,1,900,ingredient,Tomato,800\nTomato sauce,Sauce,subrecipe,g,1,900,ingredient,Olive oil,50\n" +
+    "Chicken pasta,Main,final,g,4,,recipe,Tomato sauce,300\nChicken pasta,Main,final,g,4,,ingredient,Chicken breast raw,400\n";
+
+  if (!loaded) {
+    return <div style={{ width: "100%", minHeight: 400, display: "flex", alignItems: "center", justifyContent: "center", color: C.inkSoft, fontFamily: "Inter, sans-serif" }}>Loading your prep desk…</div>;
+  }
+
+  return (
+    <div style={{ width: "100%", minHeight: "100vh" }}>
+      <Toast toast={toast} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", background: C.greenDark, borderBottom: `3px solid ${C.ink}`, flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ padding: 8, borderRadius: 4, background: C.cream }}><Icon name="chef" size={20} color={C.greenDark} /></div>
+          <div>
+            <div style={{ fontFamily: "Roboto Slab, serif", fontWeight: 800, fontSize: 20, color: C.cream, letterSpacing: 1 }}>MISE</div>
+            <div style={{ fontSize: 11, color: "#B9C3B4", marginTop: -2 }}>Nutrition spec desk for your kitchen</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={() => setTab("ingredients")} style={{ padding: "6px 12px", fontSize: 14, borderRadius: 2, fontWeight: 600, background: tab === "ingredients" ? C.cream : "transparent", color: tab === "ingredients" ? C.greenDark : C.cream, border: `1px solid ${tab === "ingredients" ? C.cream : "#4A6350"}` }}>Ingredients</button>
+          <button onClick={() => setTab("recipes")} style={{ padding: "6px 12px", fontSize: 14, borderRadius: 2, fontWeight: 600, background: tab === "recipes" ? C.cream : "transparent", color: tab === "recipes" ? C.greenDark : C.cream, border: `1px solid ${tab === "recipes" ? C.cream : "#4A6350"}` }}>Recipes</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, color: "#B9C3B4", fontSize: 12 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Icon name="utensils" size={13} /> {ingredients.length} ingredients</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Icon name="layers" size={13} /> {recipes.length} recipes</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }} title={storageMode === "db" ? "Synced live with everyone who opens this link" : "Saved on this device/browser only"}>
+            <Icon name={storageMode === "db" ? "cloud" : "device"} size={13} />
+            {storageMode === "db" ? "Team-synced" : "This device only"}
+          </span>
+        </div>
+      </div>
+
+      {tab === "ingredients" && (
+        <div style={{ padding: 24 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 2, background: C.surface, border: `1px solid ${C.line}` }}>
+              <Icon name="search" size={15} color={C.inkSoft} />
+              <input value={ingSearch} onChange={(e) => setIngSearch(e.target.value)} placeholder="Search ingredients…" style={{ border: "none", outline: "none", fontSize: 14, width: 180, background: "transparent" }} />
+            </div>
+            <select value={ingCategory} onChange={(e) => setIngCategory(e.target.value)} style={{ padding: "8px 8px", fontSize: 14, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}>
+              {ingCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => offerDownload("ingredient-template.csv", ingredientTemplate)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, borderRadius: 2, color: C.inkSoft, fontWeight: 600, background: "none", border: "none" }}>
+              <Icon name="download" size={14} /> Template
+            </button>
+            <button onClick={() => ingFileRef.current.click()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}`, color: C.ink, fontWeight: 600 }}>
+              <Icon name="upload" size={14} /> Import CSV
+            </button>
+            <input type="file" accept=".csv" ref={ingFileRef} onChange={handleIngredientCsv} style={{ display: "none" }} />
+            <button onClick={() => setIngModal(emptyIngredient())} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, borderRadius: 2, background: C.green, color: C.cream, fontWeight: 700, border: "none" }}>
+              <Icon name="plus" size={15} /> New ingredient
+            </button>
+          </div>
+
+          {filteredIngredients.length === 0 ? (
+            <EmptyState iconName="utensils" title={ingredients.length === 0 ? "No ingredients yet" : "No matches"}
+              body={ingredients.length === 0 ? "Add ingredients one at a time or import a CSV of your raw materials with nutrition values per 100 g." : "Try a different search or category."} />
+          ) : (
+            <div style={{ borderRadius: 2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+              <table style={{ width: "100%", fontSize: 14, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: C.ink, color: C.cream }}>
+                    {["Name", "Category", "Per", "Cal", "Protein", "Carbs", "Fat", "Sodium", "Allergens", ""].map((h) => (
+                      <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredIngredients.map((ing, idx) => (
+                    <tr key={ing.id} style={{ background: idx % 2 ? C.cream : C.surface }}>
+                      <td style={{ padding: "8px 12px", fontWeight: 500, color: C.ink }}>{ing.name}</td>
+                      <td style={{ padding: "8px 12px", color: C.inkSoft }}>{ing.category}</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", fontSize: 12, color: C.inkSoft }}>{ing.servingSize}{ing.unit || "g"}</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", color: C.paprika, fontWeight: 700 }}>{round(ing.calories, 0)}</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{round(ing.protein, 1)}g</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{round(ing.carbs, 1)}g</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{round(ing.fat, 1)}g</td>
+                      <td style={{ padding: "8px 12px", fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{round(ing.sodium, 0)}mg</td>
+                      <td style={{ padding: "8px 12px", maxWidth: 160 }}>
+                        {ing.allergens && ing.allergens.length > 0 ? <span style={{ fontSize: 12, color: C.paprika, fontWeight: 600 }}>{ing.allergens.join(", ")}</span> : <span style={{ fontSize: 12, color: C.inkSoft }}>—</span>}
+                      </td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                          <button onClick={() => setIngModal(ing)} style={{ padding: 4, background: "none", border: "none" }}><Icon name="edit" size={14} color={C.steel} /></button>
+                          {confirmDeleteIng === ing.id ? (
+                            <button onClick={() => deleteIngredient(ing.id)} style={{ fontSize: 12, fontWeight: 700, color: C.paprika, background: "none", border: "none" }}>confirm?</button>
+                          ) : (
+                            <button onClick={() => setConfirmDeleteIng(ing.id)} style={{ padding: 4, background: "none", border: "none" }}><Icon name="trash" size={14} color={C.inkSoft} /></button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "recipes" && (
+        <div style={{ padding: 24, display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 2, background: C.surface, border: `1px solid ${C.line}`, marginBottom: 12 }}>
+              <Icon name="search" size={14} color={C.inkSoft} />
+              <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Search recipes…" style={{ border: "none", outline: "none", fontSize: 14, width: "100%", background: "transparent" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button onClick={() => offerDownload("recipe-template.csv", recipeTemplate)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px", fontSize: 12, borderRadius: 2, color: C.inkSoft, fontWeight: 600, background: "none", border: "none" }}>
+                <Icon name="download" size={13} /> Template
+              </button>
+              <button onClick={() => recipeFileRef.current.click()} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px", fontSize: 12, borderRadius: 2, background: C.surface, border: `1px solid ${C.line}`, fontWeight: 600 }}>
+                <Icon name="upload" size={13} /> Import
+              </button>
+              <input type="file" accept=".csv" ref={recipeFileRef} onChange={handleRecipeCsv} style={{ display: "none" }} />
+            </div>
+            <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+              {[{ id: "all", label: "All" }, { id: "final", label: "Final" }, { id: "subrecipe", label: "Sub-recipes" }].map((opt) => (
+                <button key={opt.id} onClick={() => setRecipeTypeFilter(opt.id)}
+                  style={{ flex: 1, padding: "5px 6px", fontSize: 11.5, borderRadius: 2, fontWeight: 700,
+                    background: recipeTypeFilter === opt.id ? C.ink : C.surface, color: recipeTypeFilter === opt.id ? C.cream : C.inkSoft, border: `1px solid ${C.line}` }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={addRecipe} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 12px", fontSize: 14, borderRadius: 2, background: C.green, color: C.cream, fontWeight: 700, border: "none", marginBottom: 12 }}>
+              <Icon name="plus" size={15} /> New recipe
+            </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 560, overflowY: "auto", paddingRight: 4 }}>
+              {filteredRecipes.map((r) => {
+                const c = calcRecipe(r.id, ingById, recById, new Map(), new Set());
+                const perServing = c.totals.calories / Math.max(Number(r.servings) || 1, 0.001);
+                const isSelected = selectedRecipeId === r.id;
+                return (
+                  <button key={r.id} onClick={() => setSelectedRecipeId(r.id)} style={{ textAlign: "left", padding: "10px 12px", borderRadius: 2, background: isSelected ? C.ink : C.surface, border: `1px solid ${isSelected ? C.ink : C.line}` }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontWeight: 700, fontSize: 13.5, color: isSelected ? C.cream : C.ink }}>{r.name}</span>
+                      {(c.missing || c.circular) && <Icon name="alert" size={13} color={C.paprika} />}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", padding: "1px 5px", borderRadius: 2,
+                        background: r.type === "subrecipe" ? (isSelected ? "#2E4E6E" : "#DCE5EE") : (isSelected ? "#3C5C44" : "#DDE7DC"),
+                        color: r.type === "subrecipe" ? (isSelected ? "#CFE0F2" : C.steel) : (isSelected ? "#CDE4D2" : C.green) }}>
+                        {r.type === "subrecipe" ? "Sub-recipe" : "Final"}
+                      </span>
+                      <span style={{ fontSize: 11, color: isSelected ? "#B9C3B4" : C.inkSoft }}>{r.category}</span>
+                      <span style={{ fontSize: 11, color: isSelected ? "#B9C3B4" : C.inkSoft }}>·</span>
+                      <span style={{ fontSize: 11, fontFamily: "IBM Plex Mono, monospace", color: isSelected ? "#B9C3B4" : C.inkSoft }}>{round(perServing, 0)} kcal/serving</span>
+                    </div>
+                    {c.allergens && c.allergens.length > 0 && (
+                      <div style={{ marginTop: 4, fontSize: 10.5, color: isSelected ? "#F0C4A8" : C.paprika, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        Contains {c.allergens.join(", ")}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+              {filteredRecipes.length === 0 && <div style={{ fontSize: 13, color: C.inkSoft, padding: "12px 4px" }}>{recipes.length === 0 ? "No recipes yet — start a new one above." : "No matches."}</div>}
+            </div>
+          </div>
+
+          <div>
+            {!selectedRecipe ? (
+              <EmptyState iconName="chef" title="Pick a recipe to see its numbers" body="Select a recipe on the left, or start a new one. Build sub-recipes (like a sauce or dough) first, then use them as components inside a finished menu item." />
+            ) : (
+              <RecipeDetail recipe={selectedRecipe} calc={selectedCalc} ingredients={ingredients} recipes={recipes} labelBasis={labelBasis} setLabelBasis={setLabelBasis}
+                onUpdate={(patch) => updateRecipe(selectedRecipe.id, patch)}
+                newComponentType={newComponentType} setNewComponentType={setNewComponentType} newComponentRef={newComponentRef} setNewComponentRef={setNewComponentRef}
+                newComponentWeight={newComponentWeight} setNewComponentWeight={setNewComponentWeight} addComponent={addComponent} removeComponent={removeComponent}
+                updateComponentWeight={updateComponentWeight} confirmDelete={confirmDeleteRecipe === selectedRecipe.id}
+                onAskDelete={() => setConfirmDeleteRecipe(selectedRecipe.id)} onDelete={() => deleteRecipe(selectedRecipe.id)} onCancelDelete={() => setConfirmDeleteRecipe(null)}
+                onDownload={handleDownloadSpec} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {ingModal && <IngredientModal initial={ingModal} onCancel={() => setIngModal(null)} onSave={saveIngredient} />}
+
+      <div style={{ padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.line}`, fontSize: 11, color: C.inkSoft }}>
+        <span>{storageMode === "db" ? "Data is shared live with everyone who opens this link." : "Data is saved in this browser only — publish this page to share it with your team."}</span>
+        <button onClick={async () => {
+          if (confirm("Clear all ingredients and recipes? This can't be undone.")) {
+            setIngredients([]); setRecipes([]); setSelectedRecipeId(null);
+            try { await persist([], []); } catch (e) {}
+            showToast("All data cleared");
+          }
+        }} style={{ textDecoration: "underline", background: "none", border: "none", color: C.inkSoft, cursor: "pointer" }}>Clear all data</button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
